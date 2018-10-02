@@ -1,3 +1,7 @@
+bc_minisat_all v1.1.1 Released Oct. 27th 2016
+========================================
+* modified signal handler.
+
 bc_minisat_all v1.1.0 Released Sep. 30th 2015
 ========================================
 * Supported solution counting with GMP library.

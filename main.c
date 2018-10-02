@@ -223,12 +223,11 @@ void printStats(stats* stats, int cpu_time, bool interrupted)
 #endif // GMP
 }
 
-solver* slv;
-static void SIGINT_handler(int signum) {
-    printf("\n"); printf("*** INTERRUPTED ***\n");
-    printStats(&slv->stats, clock() - slv->stats.clk, true);
-    printf("\n"); printf("*** INTERRUPTED ***\n");
-    exit(0); }
+volatile sig_atomic_t eflag = 0;
+static void SIGINT_handler(int signum)
+{
+	eflag = 1;
+}
 
 
 //=================================================================================================
@@ -252,6 +251,7 @@ int main(int argc, char** argv)
   char *infile  = NULL;
   char *outfile = NULL;
   int  lim, span;
+
 
   /*** RECEIVE INPUTS ***/  
   for(int i = 1; i < argc; i++) {
@@ -291,7 +291,6 @@ int main(int argc, char** argv)
         exit(20);
     }
     s->verbosity = 1;
-    slv = s;
     if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
         fprintf(stderr, "ERROR! Cound not set signal");
         exit(1);
@@ -300,7 +299,13 @@ int main(int argc, char** argv)
     st = solver_solve(s,0,0);
 
     printf("input             : %s\n", infile);
-    printStats(&s->stats, clock() - s->stats.clk, false);
+	if (eflag == 1) {
+    	printf("\n"); printf("*** INTERRUPTED ***\n");
+    	printStats(&s->stats, clock() - s->stats.clk, true);
+    	printf("\n"); printf("*** INTERRUPTED ***\n");
+	} else {
+    	printStats(&s->stats, clock() - s->stats.clk, false);
+	}
 
     solver_delete(s);
     return 0;
