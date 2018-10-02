@@ -1,3 +1,9 @@
+bc_minisat_all v1.1.2 Released Apr. 1st 2018
+========================================
+* changed the type of cpu_time of printStats from int to unsigned long, to
+void to wrap-around, and the type of cast inside printStats from float to
+double.
+
 bc_minisat_all v1.1.1 Released Oct. 27th 2016
 ========================================
 * modified signal handler.

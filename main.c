@@ -140,9 +140,9 @@ static lbool parse_DIMACS(FILE * in, solver* s) {
 //=================================================================================================
 
 
-void printStats(stats* stats, int cpu_time, bool interrupted)
+void printStats(stats* stats, unsigned long cpu_time, bool interrupted)
 {
-    double Time    = (float)(cpu_time)/(float)(CLOCKS_PER_SEC);
+    double Time    = (double)(cpu_time)/(double)(CLOCKS_PER_SEC);
     printf("restarts          : %12llu\n", stats->starts);
     printf("conflicts         : %12.0f           (%9.0f / sec      )\n",  (double)stats->conflicts   , (double)stats->conflicts   /Time);
     printf("decisions         : %12.0f           (%9.0f / sec      )\n",  (double)stats->decisions   , (double)stats->decisions   /Time);
