@@ -27,6 +27,27 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include "solver.h"
 
+static inline void solver_inc_totsol(solver *s)
+{
+#ifdef GMP
+  mpz_add_ui(s->stats.tot_solutions,s->stats.tot_solutions,1);
+#else
+  if(s->stats.tot_solutions < ULONG_MAX)
+    s->stats.tot_solutions++;
+#endif
+}
+
+
+static inline void solver_inc_parsol(solver *s)
+{
+#ifdef GMP
+  mpz_add_ui(s->stats.par_solutions,s->stats.par_solutions,1);
+#else
+  if(s->stats.par_solutions < ULONG_MAX)
+    s->stats.par_solutions++;
+#endif
+}
+
 //=================================================================================================
 // Debug:
 
@@ -111,55 +132,6 @@ static inline void    vecp_remove(vecp* v, void* e)
 
 static inline lit solver_assumedlit(solver *s, int level) {return s->trail[veci_begin(&s->trail_lim)[level-1]];}
 static inline int solver_isimplied(solver *s, int x) {return s->levels[x] <= s->root_level || x != lit_var(solver_assumedlit(s, s->levels[x]));}
-
-
-static inline void solver_printstatus(solver *s)
-{
-    if (s->verbosity < 1) return;
-
-    printf("%.1f", (float)(clock() - s->clk)/(float)(CLOCKS_PER_SEC));
-    printf("\t%ju", s->stats.conflicts);
-    printf("\t%ju", s->stats.propagations);
-#ifdef GMP
-    printf("\t");
-    mpz_out_str(stdout, 10, s->stats.tot_solutions);
-#else
-    printf("\t%jd", s->stats.tot_solutions);
-    if(s->stats.tot_solutions == INTPTR_MAX) printf("+");
-#endif
-    printf("\t%d", vecp_size(&s->clauses));
-    printf("\t%d", vecp_size(&s->learnts));
-    printf("\t%d", s->norigclauses);
-#ifdef GMP
-    printf("\t");
-    mpz_out_str(stdout, 10, s->stats.par_solutions);
-#else
-    printf("\t%jd", s->stats.par_solutions);
-    if(s->stats.par_solutions == INTPTR_MAX) printf("+");
-#endif
-    printf("\n");
-}
-
-static inline void solver_inc_totsol(solver *s)
-{
-#ifdef GMP
-  mpz_add_ui(s->stats.tot_solutions,s->stats.tot_solutions,1);
-#else
-  if(s->stats.tot_solutions < ULONG_MAX)
-    s->stats.tot_solutions++;
-#endif
-}
-
-
-static inline void solver_inc_parsol(solver *s)
-{
-#ifdef GMP
-  mpz_add_ui(s->stats.par_solutions,s->stats.par_solutions,1);
-#else
-  if(s->stats.par_solutions < ULONG_MAX)
-    s->stats.par_solutions++;
-#endif
-}
 
 //=================================================================================================
 // Variable order functions:
@@ -324,7 +296,7 @@ static clause* clause_new(solver* s, lit* begin, lit* end, int learnt)
     size           = end - begin;
     c              = (clause*)malloc(sizeof(clause) + sizeof(lit) * size + learnt * sizeof(float));
     c->size_learnt = (size << 1) | learnt;
-    assert(((unsigned long)c & 1) == 0);
+    assert(((unsigned int)c & 1) == 0);
 
     for (i = 0; i < size; i++)
         c->lits[i] = begin[i];
@@ -492,7 +464,7 @@ static inline void solver_canceluntil(solver* s, int level) {
     reasons = s->reasons;
     bound   = (veci_begin(&s->trail_lim))[level];
 
-#ifdef INC_VAR_ORD
+#ifdef FIXEDORDER
      s->nextvar  = lit_var(trail[bound]);
 #endif
 
@@ -937,42 +909,48 @@ static void solver_simplification(solver* s)
 }
 
 
-// assume cls is blocking clause.
 // note: after using this fuction, propagation stack is canceled!
-static lbool solver_issatisfiedby(solver *s, veci *cls) // for debug
+static lbool solver_testblkcls(solver *s, veci *cls) // for debug
 {
-  clause *confl;
-  lbool res = l_True;
+    solver_canceluntil(s, s->root_level);
 
-  solver_canceluntil(s, s->root_level);
+    for (int i = veci_size(cls)-1; i >= 0; i--) {
+        lit   l   = veci_begin(cls)[i];
+        lbool val = s->assigns[lit_var(l)];
+        lbool sig = !lit_sign(l); sig += sig - 1;
+        if (val == l_Undef) {
+            assume(s, lit_neg(l));
+            clause *confl = solver_propagate(s);
+            if (confl != 0) {
+                solver_canceluntil(s, s->root_level);
+                return l_False;
+            }
+        } else if (val != sig) {
+            solver_canceluntil(s, s->root_level);
+            return l_False;
+        }
+    } 
 
-  for(int i = 0; i < veci_size(cls); i++) {
-    if(s->assigns[lit_var((veci_begin(cls)[i]))] == l_Undef) {
-      assume(s, lit_neg(veci_begin(cls)[i]));
-      confl = solver_propagate(s);
-      if(confl != 0) res = l_False;
-    }    
-  }    
+    const int m = solver_nclauses(s);
+    for (int i = 0; i < m; i++) {
+        int   res = l_False;
+        clause* c = vecp_begin(&s->clauses)[i];
+        lit* lits = clause_begin(c);
 
-  if(res == l_False) return l_False;
+        for (int j = clause_size(c)-1; j >= 0; j--) {
+            int x = lit_var(lits[j]);
+            lbool sig = !lit_sign(lits[j]); sig += sig - 1; 
+            if(s->assigns[x] == sig)
+                res = l_True;
+        }
 
-  const int m = solver_nclauses(s);
-  for (int i = 0; i < m; i++) {
-    clause* c = vecp_begin(&s->clauses)[i];
-    lit* lits = clause_begin(c);
-    res = l_False;
-    for(int j = clause_size(c)-1; j >= 0; j--) {
-      int x = lit_var(lits[j]);
-      lbool sig = !lit_sign(lits[j]); sig += sig - 1; 
-      if(s->assigns[x] == sig) {
-        res = l_True;
-      }    
+        if (res == l_False) {
+            solver_canceluntil(s, s->root_level);
+            return l_False;
+        }
     }
-    if(res == l_False) return l_False;
-  }
 
   solver_canceluntil(s, s->root_level);
-
   return l_True;
 }
 
@@ -995,16 +973,6 @@ static lbool solver_search(solver* s, int nof_conflicts, int nof_learnts)
     veci_new(&learnt_clause);
 
     for (;;){
-#ifdef TIMELIMIT
-  if (clock() >= s->clknext) {
-    s->clknext += s->clkspan;
-    solver_printstatus(s);
-  }
-  if (clock() >= s->clklim) {
-    veci_delete(&learnt_clause);
-    return l_True;
-  }
-#endif 
         clause* confl = solver_propagate(s);
         if (confl != 0){
             // CONFLICT
@@ -1050,82 +1018,121 @@ static lbool solver_search(solver* s, int nof_conflicts, int nof_learnts)
             // New variable decision:
             s->stats.decisions++;
 
-#ifdef INC_VAR_ORD // choose next variable in increasing order (for experiment)
-            for(next = s->nextvar; next < s->size && s->assigns[next] != l_Undef; next++) ;
-            if(!(next < s->size)) next = var_Undef;
+#ifdef FIXEDORDER // choose next variable in increasing order
+            for (next = s->nextvar; next < s->size && s->assigns[next] != l_Undef; next++) ;
+            if (!(next < s->size))
+                next = var_Undef;
 #else // use variable selection heuristic
             next = order_select(s,(float)random_var_freq);
 #endif
 
 
-            if (next == var_Undef){
+            if (next == var_Undef) {
 #ifdef VERBOSEDEBUG
-              printf(L_IND"**MODEL**\n", L_ind);
+                printf(L_IND"**MODEL**\n", L_ind);
 #endif
-              solver_inc_parsol(s);
+                solver_inc_parsol(s);
 
-              if(solver_dlevel(s) <= s->root_level){ // if variables are all implied.
-                if(s->out != NULL) {
-                  for(int x = 0; x < solver_nvars(s); x++) {
-                    fprintf(s->out, "%d ", (s->assigns[x] == l_True)? x+1: -(x+1));
-                  }
-                  fprintf(s->out, "0\n");
-                }
+                if (solver_dlevel(s) <= s->root_level){ // if variables are all implied.
+                    if (s->out != NULL) {
+                        for (int x = 0; x < solver_nvars(s); x++)
+                            fprintf(s->out, "%d ", (s->assigns[x] == l_True)? x+1: -(x+1));
+                        fprintf(s->out, "0\n");
+                    }
 #ifndef NONDISJOINT
+                    solver_inc_totsol(s);
+#endif
+                    veci_delete(&learnt_clause);
+                    return l_True;
+                }
+
+#ifdef  SIMPLIFY
+                solver_simplification(s);
+                if (s->out != NULL) { // output a partial assignment.
+                    for (int x = 0; x < solver_nvars(s); x++) {
+                        if (solver_isimplied(s, x))
+                            fprintf(s->out, "%d ", (s->assigns[x] == l_True)? x+1: -(x+1));
+                        else if (s->chosen[s->levels[x]] == l_True)
+                            fprintf(s->out, "%d ", (s->assigns[x] == l_True)? x+1: -(x+1));
+                    }
+                    fprintf(s->out, "0\n");
+                }
+
+                if (veci_size(&s->blkcls) == 0) {
+                    veci_delete(&learnt_clause);
+                    return l_True;
+                }
+
+#else /*NO SIMPLIFY*/
+                veci_resize(&s->blkcls,0);
+                for (int i = solver_dlevel(s); i > s->root_level; i--)
+                    veci_push(&s->blkcls, lit_neg(solver_assumedlit(s, i)));
+                if (s->out != NULL) {
+                    for (int x = 0; x < solver_nvars(s); x++)
+                        fprintf(s->out, "%d ", (s->assigns[x] == l_True)? x+1: -(x+1));
+                    fprintf(s->out, "0\n");
+                }
                 solver_inc_totsol(s);
 #endif
-                veci_delete(&learnt_clause);
-                return l_True;
-              }
 
-#ifdef  SIMPLIFICATION
-              solver_simplification(s);
-              if(s->out != NULL) { // output a partial assignment.
-                for(int x = 0; x < solver_nvars(s); x++) {
-                  if(solver_isimplied(s, x)) {
-                    fprintf(s->out, "%d ", (s->assigns[x] == l_True)? x+1: -(x+1));
-                  } else if (s->chosen[s->levels[x]] == l_True) {
-                    fprintf(s->out, "%d ", (s->assigns[x] == l_True)? x+1: -(x+1));
-                  } else {
-                    // do nothing because of redundant variables.
-                  }
-                }
-                fprintf(s->out, "0\n");
-              }
 
-              //lbool res = solver_issatisfiedby(s, &s->blkcls); // for debug
-              //assert(res == l_True);
-
-              if(veci_size(&s->blkcls) == 0) {
-                veci_delete(&learnt_clause);
-                return l_True;
-              }
-
-#else /*NO SIMPLIFICATION*/
-              veci_resize(&s->blkcls,0);
-              for (int i = solver_dlevel(s); i > s->root_level; i--)
-                veci_push(&s->blkcls, lit_neg(solver_assumedlit(s, i)));
-              if(s->out != NULL) {
-                for(int x = 0; x < solver_nvars(s); x++) {
-                  fprintf(s->out, "%d ", (s->assigns[x] == l_True)? x+1: -(x+1));
-                }
-                fprintf(s->out, "0\n");
-              }
-              solver_inc_totsol(s);
+#ifndef CONTINUE
+#ifdef DEBUG
+                lbool res = solver_testblkcls(s, &s->blkcls);
+                assert(res == l_True);
+#endif
 #endif
 
 #ifdef VERBOSEDEBUG
-              printf(L_IND"Blocked {", L_ind);
-              for (int i = 0; i < veci_size(&s->blkcls); i++) printf(" "L_LIT, L_lit(veci_begin(&s->blkcls)[i]));
-              printf(" }\n");
+                printf(L_IND"Blocked {", L_ind);
+                for (int i = 0; i < veci_size(&s->blkcls); i++)
+                    printf(" "L_LIT, L_lit(veci_begin(&s->blkcls)[i]));
+                printf(" }\n");
 #endif
 
-              solver_canceluntil(s, s->root_level);
-              solver_addclause(s, veci_begin(&s->blkcls), veci_begin(&s->blkcls)+veci_size(&s->blkcls));
-              veci_delete(&learnt_clause);
-              return l_Undef; // restart from scratch
+#ifdef CONTINUE
+                veci_resize(&learnt_clause, 0);
+                for (int i = solver_dlevel(s); i > s->root_level; i--)
+                    veci_push(&learnt_clause, solver_assumedlit(s, i));
+                assert(veci_size(&learnt_clause) > 0);
+                lit highest_lit = *veci_begin(&learnt_clause); // literal of the highest decision level
+                veci_begin(&learnt_clause)[0] = lit_neg(highest_lit);
+
+                solver_canceluntil(s, s->root_level);
+                solver_addclause(s, veci_begin(&s->blkcls), veci_begin(&s->blkcls)+veci_size(&s->blkcls));
+
+#ifdef VERBOSEDEBUG
+                printf(L_IND"**CONTINUE SEARCH BY SIMULATION**\n", L_ind);
+#endif
+                // simulate the preivous decisions until conflict or contradiction to the previous decisions happen.
+                for (int i = veci_size(&learnt_clause)-1;  i >= 0; i--) {
+                    lit l = veci_begin(&learnt_clause)[i]; // previous decision
+                    lbool val = s->assigns[lit_var(l)]; 
+                    lbool sig = !lit_sign(l); sig += sig - 1;
+
+                    if (val == l_Undef) {
+                        assume(s,l);
+                        if ((confl = solver_propagate(s)) != 0)
+                            break;
+                    } else if (val != sig) {
+                        break;  // contradict to the previous decision
+                    } else {
+                                // the previous decision is now implied.
+                    }
+                }
+                assert(solver_dlevel(s) < veci_size(&learnt_clause));
+
+#else /*RESTART FROM SCRATCH*/
+#ifdef VERBOSEDEBUG
+                printf(L_IND"**CONTINUE SEARCH FROM SCRATCH**\n", L_ind);
+#endif
+                solver_canceluntil(s, s->root_level);
+                solver_addclause(s, veci_begin(&s->blkcls), veci_begin(&s->blkcls)+veci_size(&s->blkcls));
+                veci_delete(&learnt_clause);
+                return l_Undef; // restart from scratch
+#endif
             } else {
-              assume(s,lit_neg(toLit(next)));
+                assume(s,lit_neg(toLit(next)));
             }
         }
     }
@@ -1149,7 +1156,7 @@ solver* solver_new(void)
     veci_new(&s->stack);
     veci_new(&s->blkcls);
 
-#ifdef INC_VAR_ORD
+#ifdef FIXEDORDER
      s->nextvar     = 0;
 #endif
 
@@ -1166,12 +1173,7 @@ solver* solver_new(void)
     s->trail     = 0;
 
 
-    s->clk       = (clock_t)0;
-#ifdef TIMELIMIT
-    s->clklim    = (clock_t)INT_MAX;
-    s->clkspan   = (clock_t)INT_MAX;
-    s->clknext   = (clock_t)INT_MAX;
-#endif
+    s->stats.clk       = (clock_t)0;
 
     // initialize other vars
     s->size                   = 0;

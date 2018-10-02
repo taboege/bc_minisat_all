@@ -1,4 +1,11 @@
-minisat_all v2.1.0 Released Jul. 27th 2015
+bc_minisat_all v1.1.0 Released Sep. 30th 2015
+========================================
+* Supported solution counting with GMP library.
+* Supported interruption signal handling and deleted timelimit-related functionality instead.
+* Changed names of some macros.
+* Added functionality for continuing search by simulating the previous decisions after backtracking to the root level.
+
+bc_minisat_all v1.0.0 Released Jul. 27th 2015
 ========================================
 * Generalization is now renamed to simplification, and several bugs are fixed in the simplification part.
 * Furthermore, the following change was made:

@@ -93,6 +93,7 @@ struct stats_t
 #else
     uint64   tot_solutions, par_solutions;
 #endif
+    clock_t      clk;
 };
 typedef struct stats_t stats;
 
@@ -109,14 +110,7 @@ struct solver_t
     int      qhead;         // Head index of queue.
     int      qtail;         // Tail index of queue.
 
-    clock_t      clk;           // start time
-#ifdef TIMELIMIT
-    clock_t     clklim;
-    clock_t     clkspan;
-    clock_t     clknext;
-#endif
-
-#ifdef INC_VAR_ORD
+#ifdef FIXEDORDER
     int         nextvar;    // variable to be considered next
 #endif
     // clauses

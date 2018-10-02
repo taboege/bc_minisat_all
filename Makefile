@@ -25,20 +25,19 @@ d:	WAY=debug
 r:	WAY=release
 rs:	WAY=release static
 
-# In case of a huge number of solutions, solver can not count beyond a cerntain threshold.
+# The solver can not count a huge number of solutions beyond a cerntain threshold.
 # To count precisely, install the GNU MP bignum library and uncomment the following GMPFLAGS and define GMP in MYFLAGS.
 GMPFLAGS =
 #GMPFLAGS += -lgmp
 
 MYFLAGS		= 
-#MYFLAGS		+= -D SIMPLIFICATION	# Simplification of satisyfying assignments
+#MYFLAGS		+= -D SIMPLIFY	# Simplification of satisyfying assignments
 #MYFLAGS	+= -D NONDISJOINT			# Nondisjoint partial satisfying assignments
-#MYFLAGS		+= -D INC_VAR_ORD		# Variable selection ordering is fixed
-MYFLAGS		+= -D TIMELIMIT			# timelimit option is enabled
+#MYFLAGS		+= -D FIXEDORDER		# Variable selection ordering is fixed
+MYFLAGS		+= -D CONTINUE		# Continue search at the point where a solution is found.
 #MYFLAGS		+= -D GMP 				# GNU MP bignum library is used
 
-#s:	CFLAGS+=$(COPTIMIZE) -ggdb -D NDEBUG -D VERBOSEDEBUG
-s:	CFLAGS+=$(COPTIMIZE) -ggdb -D NDEBUG $(MYFLAGS)
+s:	CFLAGS+=$(COPTIMIZE) -ggdb -D NDEBUG $(MYFLAGS) -D VERBOSEDEBUG
 p:	CFLAGS+=$(COPTIMIZE) -pg -ggdb -D DEBUG $(MYFLAGS)
 d:	CFLAGS+=-O0 -ggdb -D DEBUG $(MYFLAGS)
 r:	CFLAGS+=$(COPTIMIZE) -D NDEBUG $(MYFLAGS)

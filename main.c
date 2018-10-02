@@ -26,7 +26,7 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <time.h>
 #include <limits.h>
 //#include <unistd.h>
-//#include <signal.h>
+#include <signal.h>
 //#include <zlib.h>
 //#include <sys/time.h>
 //#include <sys/resource.h>
@@ -140,7 +140,7 @@ static lbool parse_DIMACS(FILE * in, solver* s) {
 //=================================================================================================
 
 
-void printStats(stats* stats, int cpu_time)
+void printStats(stats* stats, int cpu_time, bool interrupted)
 {
     double Time    = (float)(cpu_time)/(float)(CLOCKS_PER_SEC);
     printf("restarts          : %12llu\n", stats->starts);
@@ -149,25 +149,96 @@ void printStats(stats* stats, int cpu_time)
     printf("propagations      : %12.0f           (%9.0f / sec      )\n",  (double)stats->propagations, (double)stats->propagations/Time);
     printf("inspects          : %12.0f           (%9.0f / sec      )\n",  (double)stats->inspects    , (double)stats->inspects    /Time);
     printf("conflict literals : %12.0f           (%9.2f %% deleted  )\n", (double)stats->tot_literals, (double)(stats->max_literals - stats->tot_literals) * 100.0 / (double)stats->max_literals);
-    printf("CPU time          : %12.2f sec\n", Time);
+    printf("CPU time          : %12.2f sec\t", Time);
+    printf("\n");
+
+#ifdef NONDISJOINT
+    printf("disjoint          : disabled\n");
+#else
+    printf("disjoint          : enabled\n");
+#endif
+
+#ifdef FIXEDORDER
+    printf("variable ordering : fixed\n");
+#else
+    printf("variable ordering : heuristic\n");
+#endif
+
+#ifdef CONTINUE
+    printf("continuation      : enabled\n");
+#else
+    printf("continuation      : disabled\n");
+#endif
+
+#ifdef GMP
+    printf("gmp               : enabled\n");
+#ifdef SIMPLIFY
+    printf("simplification    : enabled\n");
+    printf("SAT (partial)     : ");
+    mpz_out_str(stdout, 10, stats->par_solutions);
+    if (interrupted)
+        printf("+");
+    printf("\n");
+
+#ifndef NONDISJOINT
+    printf("SAT (full)        : ");
+    mpz_out_str(stdout, 10, stats->tot_solutions);
+    if (interrupted)
+        printf("+");
+    printf("\n");
+#endif
+
+#else /*NO SIMPLIFY*/
+    printf("simplification    : disabled\n");
+    printf("SAT (full)        : ");
+    mpz_out_str(stdout, 10, stats->tot_solutions);
+    if (interrupted)
+        printf("+");
+    printf("\n");
+#endif
+
+#else // if GMP not defined 
+    printf("gmp               : disabled\n");
+#ifdef SIMPLIFY
+    printf("simplification    : enabled\n");
+    printf("SAT (partial)     : %12llu", stats->par_solutions);// partial assignments which cover the whole solution space.
+    if (stats->par_solutions == ULONG_MAX || interrupted)
+        printf("+");    // overflow or interrupted
+    printf("\n");
+
+#ifndef NONDISJOINT
+    printf("SAT (full)        : %12llu", stats->tot_solutions); 
+    if (stats->tot_solutions == ULONG_MAX || interrupted)
+        printf("+");    // overflow or interrupted
+    printf("\n");
+#endif
+
+#else /*NO SIMPLIFY*/
+    printf("simplification    : disabled\n");
+    printf("SAT (full)        : %12llu", stats->tot_solutions); 
+    if (stats->tot_solutions == ULONG_MAX || interrupted)
+        printf("+");    // overflow or interrupted
+    printf("\n");
+#endif
+#endif // GMP
 }
 
-//solver* slv;
-//static void SIGINT_handler(int signum) {
-//    printf("\n"); printf("*** INTERRUPTED ***\n");
-//    printStats(&slv->stats, cpuTime());
-//    printf("\n"); printf("*** INTERRUPTED ***\n");
-//    exit(0); }
+solver* slv;
+static void SIGINT_handler(int signum) {
+    printf("\n"); printf("*** INTERRUPTED ***\n");
+    printStats(&slv->stats, clock() - slv->stats.clk, true);
+    printf("\n"); printf("*** INTERRUPTED ***\n");
+    exit(0); }
 
 
 //=================================================================================================
 
 
 
-#define PRINT_USAGE(p) do{fprintf(stderr, "Usage:\t%s [options] input-file [output-file]\n", (p)); \
-    fprintf(stderr, "-t<int>\ttimelimit(sec): place an integer without space after 't'\n");                            \
-    fprintf(stderr, "-i<int>\tinterval(sec) reporting number of solutions: the same as above\n");                            \
-  } while(0)
+static inline void PRINT_USAGE(char *p)
+{
+    fprintf(stderr, "Usage:\t%s [options] input-file [output-file]\n", (p));
+}
 
 
 int main(int argc, char** argv)
@@ -176,7 +247,7 @@ int main(int argc, char** argv)
     lbool   st;
     FILE *  in;
     FILE *  out;
-    s->clk = clock();
+    s->stats.clk = clock();
 
   char *infile  = NULL;
   char *outfile = NULL;
@@ -186,25 +257,6 @@ int main(int argc, char** argv)
   for(int i = 1; i < argc; i++) {
     if(argv[i][0] == '-') {
       switch (argv[i][1]){
-      case 't':
-#ifdef TIMELIMIT
-        lim = atoi(argv[i]+2);
-        if(lim <= 0) {
-            PRINT_USAGE(argv[0]); return  0;
-        }
-        s->clklim = (clock_t)lim*CLOCKS_PER_SEC+s->clk;
-#endif
-        break;
-      case 'i':
-#ifdef TIMELIMIT
-        span = atoi(argv[i]+2);
-        if(span <= 0) {
-            PRINT_USAGE(argv[0]); return  0;
-        }
-        s->clkspan = (clock_t)span*CLOCKS_PER_SEC;
-        s->clknext = s->clk + s->clkspan;
-#endif
-        break;
       case '?': case 'h': default:
         PRINT_USAGE(argv[0]); return  0;
       }   
@@ -239,84 +291,16 @@ int main(int argc, char** argv)
         exit(20);
     }
     s->verbosity = 1;
-//    slv = s;
-//    signal(SIGINT,SIGINT_handler);
+    slv = s;
+    if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
+        fprintf(stderr, "ERROR! Cound not set signal");
+        exit(1);
+    }
 
     st = solver_solve(s,0,0);
-    printStats(&s->stats, clock() - s->clk);
-#ifdef TIMELIMIT
-    if(clock() >= s->clklim)  printf("timelimit exceeded!\n");
-#endif
-    printf("\n");
-    //printf(st == l_True ? "SATISFIABLE\n" : "UNSATISFIABLE\n");
 
-#ifdef NONDISJOINT
-    printf("non_disjoint\n");
-#else
-    printf("disjoint\n");
-#endif
-
-#ifdef INC_VAR_ORD
-    printf("variable ordering : fixed\n");
-#else
-    printf("variable ordering : heuristic\n");
-#endif
-
-#ifdef GMP
-    printf("gmp               : enabled\n");
-#ifdef SIMPLIFICATION
-    printf("simplification    : enabled\n");
-    printf("SAT (partial)     : ");
-    mpz_out_str(stdout, 10, s->stats.par_solutions);
-    printf("\n");
-
-#ifndef NONDISJOINT
-    printf("SAT (full)        : ");
-    mpz_out_str(stdout, 10, s->stats.tot_solutions);
-    printf("\n");
-#endif
-
-#else /*NO SIMPLIFICATION*/
-    printf("simplification    : disabled\n");
-    printf("SAT (full)        : ");
-    mpz_out_str(stdout, 10, s->stats.tot_solutions);
-    printf("\n");
-#endif
-
-#else // if GMP not defined 
-    printf("gmp               : disabled\n");
-#ifdef SIMPLIFICATION
-    printf("simplification    : enabled\n");
-    if(s->stats.par_solutions == ULONG_MAX)
-      printf("SAT (partial)     : %12llu+\n", s->stats.par_solutions);// overflow
-    else
-      printf("SAT (partial)     : %12llu\n", s->stats.par_solutions);// partial assignments which cover the whole solution space.
-
-#ifndef NONDISJOINT
-    if(s->stats.tot_solutions == ULONG_MAX)
-      printf("SAT (full)        : %12llu+\n", s->stats.tot_solutions);  // overflow
-    else
-      printf("SAT (full)        : %12llu\n", s->stats.tot_solutions); 
-#endif
-
-#else /*NO SIMPLIFICATION*/
-    printf("simplification    : disabled\n");
-    if(s->stats.tot_solutions == ULONG_MAX)
-      printf("SAT (full)        : %12llu+\n", s->stats.tot_solutions);  // overflow
-    else
-      printf("SAT (full)        : %12llu\n", s->stats.tot_solutions); 
-#endif
-#endif // GMP
-
-    // print the sat assignment
-    /*if ( st == l_True )
-    {
-        int k;
-        printf( "\nSatisfying solution: " );
-        for ( k = 0; k < s->model.size; k++ )
-            printf( "x%d=%d ", k, s->model.ptr[k] == l_True );
-        printf( "\n" );
-    }*/
+    printf("input             : %s\n", infile);
+    printStats(&s->stats, clock() - s->stats.clk, false);
 
     solver_delete(s);
     return 0;
