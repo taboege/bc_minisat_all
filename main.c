@@ -23,8 +23,10 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <time.h>
 #include <limits.h>
+#include <err.h>
 //#include <unistd.h>
 #include <signal.h>
 //#include <zlib.h>
@@ -35,8 +37,22 @@ OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWA
 #include <gmp.h>
 #endif
 
+#include "main.h"
+
 //=================================================================================================
 // Helpers:
+
+/* printf but for diagnostics */
+int diag(char *fmt, ...)
+{
+	va_list args;
+	int res;
+
+	va_start(args, fmt);
+	res = vfprintf(stderr, fmt, args);
+	va_end(args);
+	return res;
+}
 
 
 // Reads an input stream to end-of-file and returns the result as a 'char*' terminated by '\0'
@@ -86,7 +102,7 @@ static inline int parseInt(char** in) {
     skipWhitespace(in);
     if      (**in == '-') _neg = 1, (*in)++;
     else if (**in == '+') (*in)++;
-    if (**in < '0' || **in > '9') fprintf(stderr, "PARSE ERROR! Unexpected char: %c\n", **in), exit(1);
+    if (**in < '0' || **in > '9') warn("PARSE ERROR! Unexpected char: %c\n", **in), exit(1);
     while (**in >= '0' && **in <= '9')
         val = val*10 + (**in - '0'),
         (*in)++;
@@ -143,82 +159,82 @@ static lbool parse_DIMACS(FILE * in, solver* s) {
 void printStats(stats* stats, unsigned long cpu_time, bool interrupted)
 {
     double Time    = (double)(cpu_time)/(double)(CLOCKS_PER_SEC);
-    printf("restarts          : %12llu\n", stats->starts);
-    printf("conflicts         : %12.0f           (%9.0f / sec      )\n",  (double)stats->conflicts   , (double)stats->conflicts   /Time);
-    printf("decisions         : %12.0f           (%9.0f / sec      )\n",  (double)stats->decisions   , (double)stats->decisions   /Time);
-    printf("propagations      : %12.0f           (%9.0f / sec      )\n",  (double)stats->propagations, (double)stats->propagations/Time);
-    printf("inspects          : %12.0f           (%9.0f / sec      )\n",  (double)stats->inspects    , (double)stats->inspects    /Time);
-    printf("conflict literals : %12.0f           (%9.2f %% deleted  )\n", (double)stats->tot_literals, (double)(stats->max_literals - stats->tot_literals) * 100.0 / (double)stats->max_literals);
-    printf("CPU time          : %12.2f sec\t", Time);
-    printf("\n");
+    diag("restarts          : %12llu\n", stats->starts);
+    diag("conflicts         : %12.0f           (%9.0f / sec      )\n",  (double)stats->conflicts   , (double)stats->conflicts   /Time);
+    diag("decisions         : %12.0f           (%9.0f / sec      )\n",  (double)stats->decisions   , (double)stats->decisions   /Time);
+    diag("propagations      : %12.0f           (%9.0f / sec      )\n",  (double)stats->propagations, (double)stats->propagations/Time);
+    diag("inspects          : %12.0f           (%9.0f / sec      )\n",  (double)stats->inspects    , (double)stats->inspects    /Time);
+    diag("conflict literals : %12.0f           (%9.2f %% deleted  )\n", (double)stats->tot_literals, (double)(stats->max_literals - stats->tot_literals) * 100.0 / (double)stats->max_literals);
+    diag("CPU time          : %12.2f sec\t", Time);
+    diag("\n");
 
 #ifdef NONDISJOINT
-    printf("disjoint          : disabled\n");
+    diag("disjoint          : disabled\n");
 #else
-    printf("disjoint          : enabled\n");
+    diag("disjoint          : enabled\n");
 #endif
 
 #ifdef FIXEDORDER
-    printf("variable ordering : fixed\n");
+    diag("variable ordering : fixed\n");
 #else
-    printf("variable ordering : heuristic\n");
+    diag("variable ordering : heuristic\n");
 #endif
 
 #ifdef CONTINUE
-    printf("continuation      : enabled\n");
+    diag("continuation      : enabled\n");
 #else
-    printf("continuation      : disabled\n");
+    diag("continuation      : disabled\n");
 #endif
 
 #ifdef GMP
-    printf("gmp               : enabled\n");
+    diag("gmp               : enabled\n");
 #ifdef SIMPLIFY
-    printf("simplification    : enabled\n");
-    printf("SAT (partial)     : ");
+    diag("simplification    : enabled\n");
+    diag("SAT (partial)     : ");
     mpz_out_str(stdout, 10, stats->par_solutions);
     if (interrupted)
-        printf("+");
-    printf("\n");
+        diag("+");
+    diag("\n");
 
 #ifndef NONDISJOINT
-    printf("SAT (full)        : ");
+    diag("SAT (full)        : ");
     mpz_out_str(stdout, 10, stats->tot_solutions);
     if (interrupted)
-        printf("+");
-    printf("\n");
+        diag("+");
+    diag("\n");
 #endif
 
 #else /*NO SIMPLIFY*/
-    printf("simplification    : disabled\n");
-    printf("SAT (full)        : ");
+    diag("simplification    : disabled\n");
+    diag("SAT (full)        : ");
     mpz_out_str(stdout, 10, stats->tot_solutions);
     if (interrupted)
-        printf("+");
-    printf("\n");
+        diag("+");
+    diag("\n");
 #endif
 
 #else // if GMP not defined 
-    printf("gmp               : disabled\n");
+    diag("gmp               : disabled\n");
 #ifdef SIMPLIFY
-    printf("simplification    : enabled\n");
-    printf("SAT (partial)     : %12llu", stats->par_solutions);// partial assignments which cover the whole solution space.
+    diag("simplification    : enabled\n");
+    diag("SAT (partial)     : %12llu", stats->par_solutions);// partial assignments which cover the whole solution space.
     if (stats->par_solutions == ULONG_MAX || interrupted)
-        printf("+");    // overflow or interrupted
-    printf("\n");
+        diag("+");    // overflow or interrupted
+    diag("\n");
 
 #ifndef NONDISJOINT
-    printf("SAT (full)        : %12llu", stats->tot_solutions); 
+    diag("SAT (full)        : %12llu", stats->tot_solutions); 
     if (stats->tot_solutions == ULONG_MAX || interrupted)
-        printf("+");    // overflow or interrupted
-    printf("\n");
+        diag("+");    // overflow or interrupted
+    diag("\n");
 #endif
 
 #else /*NO SIMPLIFY*/
-    printf("simplification    : disabled\n");
-    printf("SAT (full)        : %12llu", stats->tot_solutions); 
+    diag("simplification    : disabled\n");
+    diag("SAT (full)        : %12llu", stats->tot_solutions); 
     if (stats->tot_solutions == ULONG_MAX || interrupted)
-        printf("+");    // overflow or interrupted
-    printf("\n");
+        diag("+");    // overflow or interrupted
+    diag("\n");
 #endif
 #endif // GMP
 }
@@ -236,7 +252,7 @@ static void SIGINT_handler(int signum)
 
 static inline void PRINT_USAGE(char *p)
 {
-    fprintf(stderr, "Usage:\t%s [options] input-file [output-file]\n", (p));
+    printf("Usage:\t%s [options] input-file [output-file]\n", (p));
 }
 
 
@@ -270,12 +286,12 @@ int main(int argc, char** argv)
 
     in = fopen(infile, "rb");
     if (in == NULL)
-        fprintf(stderr, "ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : infile),
+        warn("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : infile),
         exit(1);
     if(outfile != NULL) {
       out = fopen(outfile, "wb");
       if (out == NULL)
-        fprintf(stderr, "ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : outfile),
+        warn("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : outfile),
         exit(1);
       else s->out = out;
     } else {
@@ -287,22 +303,22 @@ int main(int argc, char** argv)
 
     if (st == l_False){
         solver_delete(s);
-        printf("Trivial problem\nUNSATISFIABLE\n");
+        diag("Trivial problem\nUNSATISFIABLE\n");
         exit(20);
     }
     s->verbosity = 1;
     if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
-        fprintf(stderr, "ERROR! Cound not set signal");
+        warn("ERROR! Cound not set signal");
         exit(1);
     }
 
     st = solver_solve(s,0,0);
 
-    printf("input             : %s\n", infile);
+    diag("input             : %s\n", infile);
 	if (eflag == 1) {
-    	printf("\n"); printf("*** INTERRUPTED ***\n");
+    	diag("\n"); diag("*** INTERRUPTED ***\n");
     	printStats(&s->stats, clock() - s->stats.clk, true);
-    	printf("\n"); printf("*** INTERRUPTED ***\n");
+    	diag("\n"); diag("*** INTERRUPTED ***\n");
 	} else {
     	printStats(&s->stats, clock() - s->stats.clk, false);
 	}
