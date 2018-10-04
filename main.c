@@ -18,6 +18,7 @@ DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 **************************************************************************************************/
 // Modified to compile with MS Visual Studio 6.0 by Alan Mishchenko
+// Modified to be easier to use in pipe chains by Tobias Boege <tboege@ovgu.de> 2018
 
 #include "solver.h"
 
@@ -53,7 +54,6 @@ int diag(char *fmt, ...)
 	va_end(args);
 	return res;
 }
-
 
 // Reads an input stream to end-of-file and returns the result as a 'char*' terminated by '\0'
 // (dynamic allocation in case 'in' is standard input).
@@ -264,39 +264,43 @@ int main(int argc, char** argv)
     FILE *  out;
     s->stats.clk = clock();
 
-  char *infile  = NULL;
-  char *outfile = NULL;
-  int  lim, span;
+    char *infile  = NULL;
+    char *outfile = NULL;
+    int  lim, span;
 
-
-  /*** RECEIVE INPUTS ***/  
-  for(int i = 1; i < argc; i++) {
-    if(argv[i][0] == '-') {
-      switch (argv[i][1]){
-      case '?': case 'h': default:
-        PRINT_USAGE(argv[0]); return  0;
-      }   
-    } else {
-      if(infile == NULL)        {infile  = argv[i];}
-      else if(outfile == NULL)  {outfile = argv[i];}
-      else                      {PRINT_USAGE(argv[0]); return  0;}
-    }   
-  }
-  if(infile == NULL) {PRINT_USAGE(argv[0]); return  0;}
-
-    in = fopen(infile, "rb");
-    if (in == NULL)
-        warn("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : infile),
-        exit(1);
-    if(outfile != NULL) {
-      out = fopen(outfile, "wb");
-      if (out == NULL)
-        warn("ERROR! Could not open file: %s\n", argc == 1 ? "<stdin>" : outfile),
-        exit(1);
-      else s->out = out;
-    } else {
-      out = NULL;
+    /*** RECEIVE INPUTS ***/
+    for(int i = 1; i < argc; i++) {
+      if(argv[i][0] == '-') {
+        switch (argv[i][1]){
+        case '\0': /* singular "-" */
+          if (infile == NULL)       { infile  = ""; }
+          else if (outfile == NULL) { outfile = ""; }
+          break;
+        case '?': case 'h': default:
+          PRINT_USAGE(argv[0]); return  0;
+        }
+      } else {
+        if(infile == NULL)        {infile  = argv[i];}
+        else if(outfile == NULL)  {outfile = argv[i];}
+        else                      {PRINT_USAGE(argv[0]); return  0;}
+      }
     }
+    infile  =  infile ?  infile : "";
+    outfile = outfile ? outfile : "";
+
+    /* Defaults (or "-") mean stdin and stdout */
+    if (!*infile) { in = stdin; }
+    else          { in = fopen(infile, "rb"); }
+    if (in == NULL)
+        warn("ERROR! Could not open file: %s\n", infile),
+        exit(1);
+    if (!*outfile) { out = stdout; }
+    else           { out = fopen(outfile, "wb"); }
+    if (out == NULL) {
+        warn("ERROR! Could not open file: %s\n", outfile);
+        exit(1);
+    }
+    s->out = out;
 
     st = parse_DIMACS(in, s);
     fclose(in);
